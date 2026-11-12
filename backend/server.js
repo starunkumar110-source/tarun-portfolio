@@ -21,8 +21,6 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests without an Origin header
-      // and requests from the approved frontend URLs.
       if (!origin || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
@@ -35,16 +33,20 @@ app.use(
   })
 );
 
-// Parse incoming JSON requests
 app.use(express.json());
 
-// Gmail transporter
+// Gmail SMTP configuration with timeouts
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_APP_PASSWORD,
   },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 15000,
 });
 
 // Home route
@@ -100,7 +102,7 @@ app.post("/api/contact", async (req, res) => {
       });
     }
 
-    // Save the contact message in MongoDB
+    // Save contact message to MongoDB first
     await Contact.create({
       name: cleanName,
       email: cleanEmail,
@@ -108,7 +110,7 @@ app.post("/api/contact", async (req, res) => {
       message: cleanMessage,
     });
 
-    // Send an email notification
+    // Check Gmail configuration
     if (
       !process.env.EMAIL_USER ||
       !process.env.EMAIL_APP_PASSWORD
@@ -123,6 +125,7 @@ app.post("/api/contact", async (req, res) => {
       });
     }
 
+    // Send Gmail notification
     try {
       await transporter.sendMail({
         from: `"Portfolio Contact Form" <${process.env.EMAIL_USER}>`,
@@ -144,7 +147,8 @@ ${cleanMessage}`,
       return res.status(201).json({
         success: true,
         emailSent: true,
-        message: "Your message has been sent successfully!",
+        message:
+          "Your message has been saved successfully. Thank you for contacting me!",
       });
     } catch (emailError) {
       console.error("Gmail sending error:", emailError.message);
@@ -153,7 +157,7 @@ ${cleanMessage}`,
         success: true,
         emailSent: false,
         message:
-          "Message saved successfully, but email notification failed.",
+          "Your message has been saved successfully. Email notification could not be sent right now.",
       });
     }
   } catch (error) {
@@ -166,7 +170,7 @@ ${cleanMessage}`,
   }
 });
 
-// Handle unexpected errors, including rejected CORS origins
+// Error handler
 app.use((err, req, res, next) => {
   console.error("Server error:", err.message);
 
@@ -183,7 +187,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Connect to MongoDB and start the server
+// Connect to MongoDB and start server
 const startServer = async () => {
   try {
     if (!process.env.MONGO_URI) {
