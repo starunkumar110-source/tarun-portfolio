@@ -10,13 +10,11 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Frontend URLs allowed to access this backend
 const allowedOrigins = [
   "http://localhost:5173",
   "https://tarun-portfolio-eta.vercel.app",
 ];
 
-// CORS configuration
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -34,7 +32,6 @@ app.use(
 
 app.use(express.json());
 
-// Home route
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
@@ -42,7 +39,6 @@ app.get("/", (req, res) => {
   });
 });
 
-// Health check
 app.get("/healthz", (req, res) => {
   res.status(200).json({
     success: true,
@@ -50,7 +46,7 @@ app.get("/healthz", (req, res) => {
   });
 });
 
-// Brevo email API
+// Send contact notification using Brevo API
 async function sendContactEmail({
   name,
   email,
@@ -61,9 +57,28 @@ async function sendContactEmail({
   const senderEmail = process.env.BREVO_SENDER_EMAIL;
   const receiverEmail = process.env.EMAIL_USER;
 
-  if (!apiKey || !senderEmail || !receiverEmail) {
+  const missingVariables = [];
+
+  if (!apiKey?.trim()) {
+    missingVariables.push("BREVO_API_KEY");
+  }
+
+  if (!senderEmail?.trim()) {
+    missingVariables.push("BREVO_SENDER_EMAIL");
+  }
+
+  if (!receiverEmail?.trim()) {
+    missingVariables.push("EMAIL_USER");
+  }
+
+  if (missingVariables.length > 0) {
+    console.error(
+      "Missing email environment variables:",
+      missingVariables
+    );
+
     throw new Error(
-      "Missing BREVO_API_KEY, BREVO_SENDER_EMAIL, or EMAIL_USER."
+      `Missing environment variables: ${missingVariables.join(", ")}`
     );
   }
 
@@ -73,23 +88,23 @@ async function sendContactEmail({
       method: "POST",
       headers: {
         accept: "application/json",
-        "api-key": apiKey,
+        "api-key": apiKey.trim(),
         "content-type": "application/json",
       },
       body: JSON.stringify({
         sender: {
           name: "Tarun Kumar Saini - Portfolio",
-          email: senderEmail,
+          email: senderEmail.trim(),
         },
         to: [
           {
-            email: receiverEmail,
-            name: "Tarun Kumar Saini",
+            email: receiverEmail.trim(),
+            name: "Portfolio Owner",
           },
         ],
         replyTo: {
-          email,
-          name,
+          email: email.trim(),
+          name: name.trim(),
         },
         subject: `Portfolio Contact: ${subject}`,
         textContent: `New message received from your portfolio.
@@ -108,7 +123,7 @@ ${message}`,
   if (!response.ok) {
     const errorText = await response.text();
 
-    // Do not log the API key or request headers.
+    // Log the API response, never the API key.
     console.error(
       "Brevo API error:",
       response.status,
@@ -135,7 +150,6 @@ app.post("/api/contact", async (req, res) => {
   try {
     const { name, email, subject, message } = req.body || {};
 
-    // Validate required fields
     if (
       typeof name !== "string" ||
       typeof email !== "string" ||
@@ -157,7 +171,6 @@ app.post("/api/contact", async (req, res) => {
     const cleanSubject = subject.trim();
     const cleanMessage = message.trim();
 
-    // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     if (!emailRegex.test(cleanEmail)) {
@@ -167,7 +180,7 @@ app.post("/api/contact", async (req, res) => {
       });
     }
 
-    // Save contact message to MongoDB first
+    // Save the message to MongoDB first.
     await Contact.create({
       name: cleanName,
       email: cleanEmail,
@@ -175,7 +188,7 @@ app.post("/api/contact", async (req, res) => {
       message: cleanMessage,
     });
 
-    // Send notification using Brevo
+    // Send email notification.
     try {
       await sendContactEmail({
         name: cleanName,
@@ -230,8 +243,8 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Connect to MongoDB and start server
-const startServer = async () => {
+// Connect to MongoDB and start the server.
+async function startServer() {
   try {
     if (!process.env.MONGO_URI) {
       throw new Error(
@@ -240,6 +253,7 @@ const startServer = async () => {
     }
 
     await mongoose.connect(process.env.MONGO_URI);
+
     console.log("MongoDB connected successfully!");
 
     app.listen(PORT, "0.0.0.0", () => {
@@ -249,6 +263,6 @@ const startServer = async () => {
     console.error("Server startup error:", error.message);
     process.exit(1);
   }
-};
+}
 
 startServer();
