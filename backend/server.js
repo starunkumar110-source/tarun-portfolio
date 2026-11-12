@@ -5,20 +5,38 @@ import dotenv from "dotenv";
 import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import Contact from "./models/Contact.js";
-import dns from "node:dns";
-
-dns.setServers(["8.8.8.8", "1.1.1.1"]);
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Allowed frontend origins
+// Frontend URLs allowed to access this backend
 const allowedOrigins = [
   "http://localhost:5173",
   "https://tarun-portfolio-eta.vercel.app",
 ];
+
+// CORS configuration
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests without an Origin header
+      // and requests from the approved frontend URLs.
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.error("Blocked by CORS:", origin);
+      return callback(new Error("Not allowed by CORS"));
+    },
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+// Parse incoming JSON requests
+app.use(express.json());
 
 // Gmail transporter
 const transporter = nodemailer.createTransport({
@@ -29,22 +47,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Middleware
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      return callback(new Error("Not allowed by CORS"));
-    },
-  })
-);
-
-app.use(express.json());
-
-// Home API
+// Home route
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
@@ -60,16 +63,21 @@ app.get("/healthz", (req, res) => {
   });
 });
 
-// Contact Form API
+// Contact form API
 app.post("/api/contact", async (req, res) => {
   try {
-    const { name, email, subject, message } = req.body;
+    const { name, email, subject, message } = req.body || {};
 
+    // Validate required fields
     if (
-      !name?.trim() ||
-      !email?.trim() ||
-      !subject?.trim() ||
-      !message?.trim()
+      typeof name !== "string" ||
+      typeof email !== "string" ||
+      typeof subject !== "string" ||
+      typeof message !== "string" ||
+      !name.trim() ||
+      !email.trim() ||
+      !subject.trim() ||
+      !message.trim()
     ) {
       return res.status(400).json({
         success: false,
@@ -77,48 +85,58 @@ app.post("/api/contact", async (req, res) => {
       });
     }
 
-    // Validate email
+    const cleanName = name.trim();
+    const cleanEmail = email.trim();
+    const cleanSubject = subject.trim();
+    const cleanMessage = message.trim();
+
+    // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-    if (!emailRegex.test(email.trim())) {
+    if (!emailRegex.test(cleanEmail)) {
       return res.status(400).json({
         success: false,
         message: "Please enter a valid email address.",
       });
     }
 
-    // Save contact message to MongoDB
+    // Save the contact message in MongoDB
     await Contact.create({
-      name: name.trim(),
-      email: email.trim(),
-      subject: subject.trim(),
-      message: message.trim(),
+      name: cleanName,
+      email: cleanEmail,
+      subject: cleanSubject,
+      message: cleanMessage,
     });
 
-    // Send email notification
-    try {
-      if (
-        !process.env.EMAIL_USER ||
-        !process.env.EMAIL_APP_PASSWORD
-      ) {
-        throw new Error(
-          "Gmail settings are missing from environment variables."
-        );
-      }
+    // Send an email notification
+    if (
+      !process.env.EMAIL_USER ||
+      !process.env.EMAIL_APP_PASSWORD
+    ) {
+      console.error("Gmail environment variables are missing.");
 
+      return res.status(201).json({
+        success: true,
+        emailSent: false,
+        message:
+          "Message saved successfully, but email notification is not configured.",
+      });
+    }
+
+    try {
       await transporter.sendMail({
         from: `"Portfolio Contact Form" <${process.env.EMAIL_USER}>`,
         to: process.env.EMAIL_USER,
-        replyTo: email.trim(),
-        subject: `Portfolio Contact: ${subject.trim()}`,
+        replyTo: cleanEmail,
+        subject: `Portfolio Contact: ${cleanSubject}`,
         text: `New message received from your portfolio.
 
-Name: ${name.trim()}
-Email: ${email.trim()}
-Subject: ${subject.trim()}
+Name: ${cleanName}
+Email: ${cleanEmail}
+Subject: ${cleanSubject}
 
 Message:
-${message.trim()}`,
+${cleanMessage}`,
       });
 
       console.log("Email notification sent successfully!");
@@ -126,20 +144,16 @@ ${message.trim()}`,
       return res.status(201).json({
         success: true,
         emailSent: true,
-        message:
-          "Message saved and Gmail notification sent successfully!",
+        message: "Your message has been sent successfully!",
       });
     } catch (emailError) {
-      console.error(
-        "Gmail sending error:",
-        emailError.message
-      );
+      console.error("Gmail sending error:", emailError.message);
 
       return res.status(201).json({
         success: true,
         emailSent: false,
         message:
-          "Message saved to database, but Gmail notification failed.",
+          "Message saved successfully, but email notification failed.",
       });
     }
   } catch (error) {
@@ -147,22 +161,36 @@ ${message.trim()}`,
 
     return res.status(500).json({
       success: false,
-      message: "Unable to save contact form data.",
+      message: "Unable to process your message. Please try again.",
     });
   }
 });
 
-// Connect MongoDB and start server
+// Handle unexpected errors, including rejected CORS origins
+app.use((err, req, res, next) => {
+  console.error("Server error:", err.message);
+
+  if (err.message === "Not allowed by CORS") {
+    return res.status(403).json({
+      success: false,
+      message: "This website is not allowed to access the API.",
+    });
+  }
+
+  return res.status(500).json({
+    success: false,
+    message: "Internal server error.",
+  });
+});
+
+// Connect to MongoDB and start the server
 const startServer = async () => {
   try {
     if (!process.env.MONGO_URI) {
-      throw new Error(
-        "MONGO_URI is missing from environment variables."
-      );
+      throw new Error("MONGO_URI is missing from environment variables.");
     }
 
     await mongoose.connect(process.env.MONGO_URI);
-
     console.log("MongoDB connected successfully!");
 
     app.listen(PORT, "0.0.0.0", () => {
