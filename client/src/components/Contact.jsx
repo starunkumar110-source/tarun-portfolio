@@ -13,7 +13,9 @@ import {
 
 import "./Contact.css";
 
-const API_URL = "http://localhost:5000/api/contact";
+// Live Render backend API URL
+const API_URL =
+  "https://tarun-portfolio-backend.onrender.com/api/contact";
 
 const Contact = () => {
   const [formData, setFormData] = useState({
@@ -97,7 +99,9 @@ const Contact = () => {
     if (!formData.email.trim()) {
       newErrors.email = "Please enter your email.";
     } else if (
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+        formData.email.trim()
+      )
     ) {
       newErrors.email = "Please enter a valid email address.";
     }
