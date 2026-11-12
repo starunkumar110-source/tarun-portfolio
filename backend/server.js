@@ -3,7 +3,6 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
-import nodemailer from "nodemailer";
 import Contact from "./models/Contact.js";
 
 dotenv.config();
@@ -35,20 +34,6 @@ app.use(
 
 app.use(express.json());
 
-// Gmail SMTP configuration with timeouts
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_APP_PASSWORD,
-  },
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 15000,
-});
-
 // Home route
 app.get("/", (req, res) => {
   res.status(200).json({
@@ -64,6 +49,86 @@ app.get("/healthz", (req, res) => {
     message: "Backend is healthy!",
   });
 });
+
+// Brevo email API
+async function sendContactEmail({
+  name,
+  email,
+  subject,
+  message,
+}) {
+  const apiKey = process.env.BREVO_API_KEY;
+  const senderEmail = process.env.BREVO_SENDER_EMAIL;
+  const receiverEmail = process.env.EMAIL_USER;
+
+  if (!apiKey || !senderEmail || !receiverEmail) {
+    throw new Error(
+      "Missing BREVO_API_KEY, BREVO_SENDER_EMAIL, or EMAIL_USER."
+    );
+  }
+
+  const response = await fetch(
+    "https://api.brevo.com/v3/smtp/email",
+    {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "api-key": apiKey,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        sender: {
+          name: "Tarun Kumar Saini - Portfolio",
+          email: senderEmail,
+        },
+        to: [
+          {
+            email: receiverEmail,
+            name: "Tarun Kumar Saini",
+          },
+        ],
+        replyTo: {
+          email,
+          name,
+        },
+        subject: `Portfolio Contact: ${subject}`,
+        textContent: `New message received from your portfolio.
+
+Name: ${name}
+Email: ${email}
+Subject: ${subject}
+
+Message:
+${message}`,
+      }),
+      signal: AbortSignal.timeout(20000),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+
+    // Do not log the API key or request headers.
+    console.error(
+      "Brevo API error:",
+      response.status,
+      errorText
+    );
+
+    throw new Error(
+      `Brevo email request failed with status ${response.status}.`
+    );
+  }
+
+  const result = await response.json();
+
+  console.log(
+    "Brevo accepted email request. Message ID:",
+    result.messageId || "not provided"
+  );
+
+  return result;
+}
 
 // Contact form API
 app.post("/api/contact", async (req, res) => {
@@ -110,39 +175,14 @@ app.post("/api/contact", async (req, res) => {
       message: cleanMessage,
     });
 
-    // Check Gmail configuration
-    if (
-      !process.env.EMAIL_USER ||
-      !process.env.EMAIL_APP_PASSWORD
-    ) {
-      console.error("Gmail environment variables are missing.");
-
-      return res.status(201).json({
-        success: true,
-        emailSent: false,
-        message:
-          "Message saved successfully, but email notification is not configured.",
-      });
-    }
-
-    // Send Gmail notification
+    // Send notification using Brevo
     try {
-      await transporter.sendMail({
-        from: `"Portfolio Contact Form" <${process.env.EMAIL_USER}>`,
-        to: process.env.EMAIL_USER,
-        replyTo: cleanEmail,
-        subject: `Portfolio Contact: ${cleanSubject}`,
-        text: `New message received from your portfolio.
-
-Name: ${cleanName}
-Email: ${cleanEmail}
-Subject: ${cleanSubject}
-
-Message:
-${cleanMessage}`,
+      await sendContactEmail({
+        name: cleanName,
+        email: cleanEmail,
+        subject: cleanSubject,
+        message: cleanMessage,
       });
-
-      console.log("Email notification sent successfully!");
 
       return res.status(201).json({
         success: true,
@@ -151,13 +191,16 @@ ${cleanMessage}`,
           "Your message has been saved successfully. Thank you for contacting me!",
       });
     } catch (emailError) {
-      console.error("Gmail sending error:", emailError.message);
+      console.error(
+        "Email notification failed:",
+        emailError.message
+      );
 
       return res.status(201).json({
         success: true,
         emailSent: false,
         message:
-          "Your message has been saved successfully. Email notification could not be sent right now.",
+          "Your message was saved, but the email notification could not be sent. Please try again later.",
       });
     }
   } catch (error) {
@@ -191,7 +234,9 @@ app.use((err, req, res, next) => {
 const startServer = async () => {
   try {
     if (!process.env.MONGO_URI) {
-      throw new Error("MONGO_URI is missing from environment variables.");
+      throw new Error(
+        "MONGO_URI is missing from environment variables."
+      );
     }
 
     await mongoose.connect(process.env.MONGO_URI);
