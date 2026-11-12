@@ -5,7 +5,6 @@ import dotenv from "dotenv";
 import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import Contact from "./models/Contact.js";
-
 import dns from "node:dns";
 
 dns.setServers(["8.8.8.8", "1.1.1.1"]);
@@ -18,8 +17,7 @@ const PORT = process.env.PORT || 5000;
 // Allowed frontend origins
 const allowedOrigins = [
   "http://localhost:5173",
-  // Add your actual Vercel URL here after deployment
-  // Example: "https://your-portfolio.vercel.app",
+  "https://tarun-portfolio-eta.vercel.app",
 ];
 
 // Gmail transporter
@@ -79,6 +77,7 @@ app.post("/api/contact", async (req, res) => {
       });
     }
 
+    // Validate email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     if (!emailRegex.test(email.trim())) {
@@ -98,7 +97,10 @@ app.post("/api/contact", async (req, res) => {
 
     // Send email notification
     try {
-      if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) {
+      if (
+        !process.env.EMAIL_USER ||
+        !process.env.EMAIL_APP_PASSWORD
+      ) {
         throw new Error(
           "Gmail settings are missing from environment variables."
         );
@@ -124,10 +126,14 @@ ${message.trim()}`,
       return res.status(201).json({
         success: true,
         emailSent: true,
-        message: "Message saved and Gmail notification sent successfully!",
+        message:
+          "Message saved and Gmail notification sent successfully!",
       });
     } catch (emailError) {
-      console.error("Gmail sending error:", emailError.message);
+      console.error(
+        "Gmail sending error:",
+        emailError.message
+      );
 
       return res.status(201).json({
         success: true,
@@ -150,7 +156,9 @@ ${message.trim()}`,
 const startServer = async () => {
   try {
     if (!process.env.MONGO_URI) {
-      throw new Error("MONGO_URI is missing from environment variables.");
+      throw new Error(
+        "MONGO_URI is missing from environment variables."
+      );
     }
 
     await mongoose.connect(process.env.MONGO_URI);
