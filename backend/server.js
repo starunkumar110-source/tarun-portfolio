@@ -6,10 +6,21 @@ import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import Contact from "./models/Contact.js";
 
+import dns from "node:dns";
+
+dns.setServers(["8.8.8.8", "1.1.1.1"]);
+
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Allowed frontend origins
+const allowedOrigins = [
+  "http://localhost:5173",
+  // Add your actual Vercel URL here after deployment
+  // Example: "https://your-portfolio.vercel.app",
+];
 
 // Gmail transporter
 const transporter = nodemailer.createTransport({
@@ -21,7 +32,18 @@ const transporter = nodemailer.createTransport({
 });
 
 // Middleware
-app.use(cors({ origin: "http://localhost:5173" }));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
+  })
+);
+
 app.use(express.json());
 
 // Home API
@@ -29,6 +51,14 @@ app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
     message: "Portfolio Backend is running!",
+  });
+});
+
+// Health check
+app.get("/healthz", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Backend is healthy!",
   });
 });
 
@@ -58,7 +88,7 @@ app.post("/api/contact", async (req, res) => {
       });
     }
 
-    // 1. Save contact message to MongoDB
+    // Save contact message to MongoDB
     await Contact.create({
       name: name.trim(),
       email: email.trim(),
@@ -66,10 +96,12 @@ app.post("/api/contact", async (req, res) => {
       message: message.trim(),
     });
 
-    // 2. Send email notification to your Gmail
+    // Send email notification
     try {
       if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) {
-        throw new Error("Gmail settings are missing from the .env file");
+        throw new Error(
+          "Gmail settings are missing from environment variables."
+        );
       }
 
       await transporter.sendMail({
@@ -101,7 +133,7 @@ ${message.trim()}`,
         success: true,
         emailSent: false,
         message:
-          "Message saved to database, but Gmail notification failed. Check the backend terminal.",
+          "Message saved to database, but Gmail notification failed.",
       });
     }
   } catch (error) {
@@ -118,14 +150,15 @@ ${message.trim()}`,
 const startServer = async () => {
   try {
     if (!process.env.MONGO_URI) {
-      throw new Error("MONGO_URI is missing from .env file");
+      throw new Error("MONGO_URI is missing from environment variables.");
     }
 
     await mongoose.connect(process.env.MONGO_URI);
+
     console.log("MongoDB connected successfully!");
 
-    app.listen(PORT, () => {
-      console.log(`Server running at http://localhost:${PORT}`);
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server started successfully on port ${PORT}`);
     });
   } catch (error) {
     console.error("Server startup error:", error.message);
